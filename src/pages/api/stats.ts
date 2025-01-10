@@ -12,6 +12,9 @@ const octokit = new Octokit({
   auth: GITHUB_TOKEN,
 });
 
+const YEAR_START = new Date("2024-01-01");
+const YEAR_END = new Date("2025-01-01");
+
 interface ContributionDay {
   contributionCount: number;
   date: string;
@@ -21,7 +24,9 @@ interface ContributionDay {
 interface GitHubStats {
   longestStreak: number;
   totalCommits: number;
+  yearTotalCommits: number;
   commitRank: string;
+  commitRankThisYear: string;
   calendarData: ContributionDay[];
   mostActiveDay: {
     name: string;
@@ -46,6 +51,30 @@ function getCommitRank(totalCommits: number): string {
   if (totalCommits >= 500) return "Top 10%-15%";
   if (totalCommits >= 200) return "Top 25%-30%";
   if (totalCommits >= 50) return "Median 50%";
+  return "Bottom 30%";
+}
+
+function getThisYearCommitRank(commits: number): string {
+  let dayToUse = new Date()
+  if (dayToUse > YEAR_END) {
+    dayToUse = YEAR_END
+  }
+  const daysThisYearMillis = Math.abs(dayToUse - YEAR_START);
+  const daysThisYear = Math.floor(daysThisYearMillis / 86400000);
+  let daysToUse = Math.min(daysThisYear, 365)
+  let daysTotal = 365;
+  if (YEAR_START.getFullYear() % 4 == 0) {
+    daysToUse = Math.min(daysThisYear, 366)
+    daysTotal = 366;
+  }
+  const dayValue = daysToUse / daysTotal;
+
+  if (commits >= (5000 * dayValue)) return "Top 0.5%-1%";
+  if (commits >= (2000 * dayValue)) return "Top 1%-3%";
+  if (commits >= (1000 * dayValue)) return "Top 5%-10%";
+  if (commits >= (500 * dayValue)) return "Top 10%-15%";
+  if (commits >= (200 * dayValue)) return "Top 25%-30%";
+  if (commits >= (50 * dayValue)) return "Median 50%";
   return "Bottom 30%";
 }
 
@@ -134,7 +163,13 @@ export default async function GET(request: Request): Promise<NextResponse> {
     const contributionDays =
       userData.contributionsCollection.contributionCalendar.weeks
         .flatMap((week: any) => week.contributionDays)
-        .filter((day: any) => new Date(day.date) >= new Date("2024-01-01"));
+        .filter((day: any) => new Date(day.date) >= YEAR_START && new Date(day.date) < YEAR_END);
+
+
+    let yearTotalCommits = 0;
+    contributionDays.forEach((day: ContributionDay) => {
+      yearTotalCommits += day.contributionCount;
+    });
 
     // Calculate monthly contribution statistics
     const monthlyCommits: Record<string, number> = {};
@@ -196,14 +231,16 @@ export default async function GET(request: Request): Promise<NextResponse> {
       }
     }
 
-    const totalCommits =
+    const totalCommitsLifetime =
       userData.contributionsCollection.contributionCalendar.totalContributions;
 
     // Prepare and return the final statistics
     const stats: GitHubStats = {
       longestStreak: maxStreak,
-      totalCommits,
-      commitRank: getCommitRank(totalCommits),
+      totalCommits: totalCommitsLifetime,
+      yearTotalCommits,
+      commitRank: getCommitRank(totalCommitsLifetime),
+      commitRankThisYear: getThisYearCommitRank(yearTotalCommits),
       calendarData: contributionDays,
       mostActiveDay: {
         name: WEEKDAY_NAMES[parseInt(mostActiveDay[0])],
